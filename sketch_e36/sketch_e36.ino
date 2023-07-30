@@ -1,23 +1,40 @@
 #include <SoftwareSerial.h>
+#include <String.h>
 #include <EEPROM.h>
+#include <AltSoftSerial.h>
 #include <Adafruit_Fingerprint.h>
 
-SoftwareSerial mySerial(4, 3);
-Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
 
 SoftwareSerial EEBlue(11, 10);  // TX | RX
-const int relayPin = 6;         // pino do rele
+SoftwareSerial fingerprintSerial(4, 3);
+
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerprintSerial);
+
+const int relayPin = 6;          // pino do rele
+const int buttonPin = A0;        // Switch liga/desliga
+const int switchPinBLE = A1;     // Module Bluetooth
+const int switchPinFinger = A2;  // Module Fingerprint
+
+unsigned long startTime;
+bool minhaVariavel = true;
+unsigned long tresMinutos = 180000;
+
+int valorLido;
+bool botaoPressionado = false;
 
 //Variaveis do sistema
 bool adminMode = false;
 bool hasAdmin = false;
-bool lockState = false;
-bool inParkingMode = false;
-bool inGarageMode = false;
-bool lockedForPolice = false;  // prendeu o carro? blz, só leva no guincho :)
+bool lockState = true;
+bool inOficinaMode;
+bool inGarageMode;
+bool inLockdownMode;  // prendeu o carro? blz, só leva no guincho :)
 int countStartWithoutPwd = 0;
-int maxStartAtGarageMode = -1;
-int maxStartAtParkingMode = 15;
+int maxStartAtOficinaMode = -1;
+int maxStartAtGarageMode = 15;
+bool connectionValidated = false;
+String verifyCode = "drift";
+String verifyCode2 = "lock";
 //Fim variaveis do sistema
 
 //Funções do SO
@@ -27,27 +44,38 @@ uint8_t modoGravacaoID(uint8_t IDgravar, bool isAdmin = false);
 void recoveryData() {
   byte adminId = EEPROM.read(1);
   hasAdmin = (adminId != 0xFF);
-  inParkingMode = EEPROM.read(5);
+  inOficinaMode = EEPROM.read(5);
   inGarageMode = EEPROM.read(6);
-  lockedForPolice = EEPROM.read(7);
+  inLockdownMode = EEPROM.read(7);
   countStartWithoutPwd = EEPROM.read(8);
 }
 
 void setup() {
+  pinMode(buttonPin, INPUT);  // Configura o pino do botão como entrada
+  pinMode(switchPinBLE, OUTPUT);
+  pinMode(switchPinFinger, OUTPUT);
+  digitalWrite(switchPinBLE, LOW);
+  digitalWrite(switchPinFinger, HIGH);
   Serial.begin(9600);
-  EEBlue.begin(9600);  //Baud Rate for command Mode.
+  // EEBlue.begin(9600);  //Baud Rate for command Mode.
   finger.begin(57600);
-
+  fingerprintSerial.begin(57600);
+  startTime = millis(); 
   pinMode(relayPin, OUTPUT);
-  // Inicialmente, desligar o relé
-  digitalWrite(relayPin, HIGH);
 
-  if (finger.verifyPassword()) {
-    Serial.println("Leitor FPM10A encontrado!");
+  if (inOficinaMode) {
+    digitalWrite(relayPin, LOW);
+    digitalWrite(switchPinFinger, LOW);
+  } else if (inGarageMode) {
+    if (countStartWithoutPwd <= maxStartAtGarageMode) {
+      digitalWrite(relayPin, LOW);
+      if (inGarageMode) {
+        int netTick = countStartWithoutPwd + 1;
+        EEPROM.write(8, netTick);
+      }
+    }
   } else {
-    Serial.println("Leitor FPM10A não encontrado. Verifique as conexões.");
-    while (1)
-      ;  // Se o leitor não for encontrado, pare o programa
+    digitalWrite(relayPin, HIGH);
   }
 
   recoveryData();
@@ -55,35 +83,138 @@ void setup() {
   Serial.println("Started System!");
 }
 
+void sendAppData() {
+  // Montar a mensagem com os dados separados por "|"
+  Serial.print("ndcr:verify2:");
+  Serial.print(lockState);
+  Serial.print("|");
+  Serial.print(adminMode);
+  Serial.print("|");
+  Serial.print(hasAdmin);
+  Serial.print("|");
+  Serial.print(inOficinaMode);
+  Serial.print("|");
+  Serial.print(inGarageMode);
+  Serial.print("|");
+  Serial.print(inLockdownMode);
+  Serial.print("|");
+  Serial.print(countStartWithoutPwd);
+  Serial.print("|");
+  Serial.print(maxStartAtGarageMode);
+  Serial.print("|");
+  Serial.print(maxStartAtParkingMode);
+  Serial.println("#");
+}
+
+void setMode(String mode, bool state) {
+  if (mode == "oficina") {
+    inOficinaMode = state;
+    inGarageMode = false;
+  } else if (mode == "garage") {
+    if (inGarageMode && !state) {
+      int netTick = 0;
+      EEPROM.write(8, netTick);
+    }
+    inGarageMode = state;
+    inOficinaMode = false;
+  } else if (mode == "lockdown") {
+    inLockdownMode = state;
+    inOficinaMode = false;
+    inGarageMode = false;
+  }
+
+  EEPROM.write(5, inOficinaMode);
+  EEPROM.write(6, inGarageMode);
+  EEPROM.write(7, inLockdownMode);
+}
+
+void processCommand(String command) {
+  if (command.startsWith("ndc:")) {
+    String data = command.substring(4); // Remove o "ndc:" do início da string
+    // Verifica se é um comando apenas com chave ou com chave e valor
+    if (data.indexOf(':') != -1) {
+      String key = data.substring(0, data.indexOf(':'));
+      String value = data.substring(data.indexOf(':') + 1);
+      Serial.println("Recivied => " + key + " / " + value);
+      if (key == "verify") {
+        if (verifyCode == value) { 
+          connectionValidated = true;
+          sendAppData();
+        } else if (verifyCode2 == value && inLockdownMode) {
+          setMode("lockdown", false);
+          connectionValidated = true;
+          sendAppData();
+        } else {
+          connectionValidated = false;
+          Serial.write("ndcr:verify1#");
+        }
+      } else if (key == "mode") {
+        if (value == "oficina") {
+          setMode(value, !inOficinaMode);
+        } else if (value == "garage") {
+          setMode(value, !inGarageMode);
+        } else if (value == "lockdown") {
+          setMode(value, !inLockdownMode);
+        }
+      } else {
+        // Comando desconhecido ou não tratado
+      }
+    } else {
+      // Comando apenas com chave
+      if (data == "lock") {
+        lockState = true;
+        Serial.write("ndcr:lockstate1#");
+      } else if (data == "unlock") {
+        lockState = false;
+        Serial.write("ndcr:lockstate2#");
+      } else {
+        // Comando desconhecido ou não tratado
+      }
+    }
+  }
+}
+
 void loop() {
-  adminController();
+
+  // Ligar o módulo de fingerprint quando o botão for pressionado
+  valorLido = analogRead(buttonPin);
+  if (valorLido < 500) {
+    if (!botaoPressionado) {
+      botaoPressionado = true;
+      digitalWrite(switchPinBLE, LOW);
+      digitalWrite(switchPinFinger, HIGH); // Ligar o módulo de fingerprint
+    }
+  } else {
+    botaoPressionado = false;
+    if (minhaVariavel) {
+      digitalWrite(switchPinFinger, inOficinaMode ? LOW : HIGH);
+    } else {
+      digitalWrite(switchPinFinger, LOW);
+    }
+  }
+
+  // Verifica se já passaram 3 minutos desde o início
+  if (millis() - startTime >= tresMinutos) {
+    minhaVariavel = false; // Define a variável como false após 3 minutos
+  }
+
   getFingerprintIDez();
-  // Keep reading from HC-05 and send to Arduino Serial Monitor
-  if (EEBlue.available()) {
-    char data = EEBlue.read();
-    Serial.println(data);
 
-    if (data == 'a') {
-      // Se o dado recebido for "a", definir a variável adminMode como verdadeira (true)
-      adminMode = true;
-      Serial.println("adminMode ativado!");  // Opcional: enviar um feedback para o aplicativo
-    }
-
-    if (data == 'c') {
-      // Se o dado recebido for "c", ativar o relé
-      digitalWrite(relayPin, LOW);
-      // Aguardar um curto período para acionar o relé (ajuste conforme necessário)
-      delay(1500);
-      // Desligar o relé após um curto período (ajuste conforme necessário)
-      digitalWrite(relayPin, HIGH);
-    }
-  }
-
-  // Keep reading from Arduino Serial Monitor and send to HC-05
   if (Serial.available()) {
-    char data = Serial.read();
-    EEBlue.write(data);
+    String dataReceived = Serial.readString();
+    processCommand(dataReceived);
   }
+  
+  adminController();
+
+  if (lockState) {
+    digitalWrite(relayPin, HIGH);
+  } else {
+    if (!inLockdownMode) {
+      digitalWrite(relayPin, LOW);
+    }
+  }
+
 }
 
 
@@ -106,14 +237,9 @@ int getFingerprintIDez() {
     adminMode = !adminMode;
   }
 
-  if (lockState) {
-    lockState = false;
-    digitalWrite(relayPin, HIGH);
-  } else {
-    lockState = true;
-    digitalWrite(relayPin, LOW);
-  }
-  
+  lockState = !lockState;
+
+
   Serial.print("ID encontrado #");
   Serial.print(finger.fingerID);
   Serial.print(" com confiança de ");
