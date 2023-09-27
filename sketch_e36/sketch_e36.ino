@@ -5,12 +5,11 @@
 #include <Adafruit_Fingerprint.h>
 
 
-SoftwareSerial EEBlue(11, 10);  // TX | RX
-SoftwareSerial fingerprintSerial(4, 3);
+SoftwareSerial fingerprintSerial(10, 9);
 
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerprintSerial);
 
-const int relayPin = 6;          // pino do rele
+const int relayPin = 2;          // pino do rele
 const int buttonPin = A0;        // Switch liga/desliga
 const int switchPinBLE = A1;     // Module Bluetooth
 const int switchPinFinger = A2;  // Module Fingerprint
@@ -28,7 +27,7 @@ bool hasAdmin = false;
 bool lockState = true;
 bool inOficinaMode;
 bool inGarageMode;
-bool inLockdownMode;  // prendeu o carro? blz, só leva no guincho :)
+bool inLockdownMode = false;  // prendeu o carro? blz, só leva no guincho :)
 int countStartWithoutPwd = 0;
 int maxStartAtOficinaMode = -1;
 int maxStartAtGarageMode = 15;
@@ -46,11 +45,12 @@ void recoveryData() {
   hasAdmin = (adminId != 0xFF);
   inOficinaMode = EEPROM.read(5);
   inGarageMode = EEPROM.read(6);
-  inLockdownMode = EEPROM.read(7);
+  // inLockdownMode = EEPROM.read(7);
   countStartWithoutPwd = EEPROM.read(8);
 }
 
 void setup() {
+  recoveryData();
   pinMode(buttonPin, INPUT);  // Configura o pino do botão como entrada
   pinMode(switchPinBLE, OUTPUT);
   pinMode(switchPinFinger, OUTPUT);
@@ -60,25 +60,25 @@ void setup() {
   // EEBlue.begin(9600);  //Baud Rate for command Mode.
   finger.begin(57600);
   fingerprintSerial.begin(57600);
-  startTime = millis(); 
+  startTime = millis();
   pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, HIGH);
 
   if (inOficinaMode) {
-    digitalWrite(relayPin, LOW);
-    digitalWrite(switchPinFinger, LOW);
+    Serial.println("Modo Oficina ON");
   } else if (inGarageMode) {
     if (countStartWithoutPwd <= maxStartAtGarageMode) {
-      digitalWrite(relayPin, LOW);
+      Serial.println("Modo Garagem ON");
       if (inGarageMode) {
         int netTick = countStartWithoutPwd + 1;
         EEPROM.write(8, netTick);
       }
+    } else {
+      Serial.println("Modo Garagem Estourou Limite");
     }
   } else {
-    digitalWrite(relayPin, HIGH);
+    Serial.println("Modo Padrão");
   }
-
-  recoveryData();
 
   Serial.println("Started System!");
 }
@@ -102,7 +102,7 @@ void sendAppData() {
   Serial.print("|");
   Serial.print(maxStartAtGarageMode);
   Serial.print("|");
-  Serial.print(maxStartAtParkingMode);
+  Serial.print(maxStartAtOficinaMode);
   Serial.println("#");
 }
 
@@ -130,14 +130,14 @@ void setMode(String mode, bool state) {
 
 void processCommand(String command) {
   if (command.startsWith("ndc:")) {
-    String data = command.substring(4); // Remove o "ndc:" do início da string
+    String data = command.substring(4);  // Remove o "ndc:" do início da string
     // Verifica se é um comando apenas com chave ou com chave e valor
     if (data.indexOf(':') != -1) {
       String key = data.substring(0, data.indexOf(':'));
       String value = data.substring(data.indexOf(':') + 1);
       Serial.println("Recivied => " + key + " / " + value);
       if (key == "verify") {
-        if (verifyCode == value) { 
+        if (verifyCode == value) {
           connectionValidated = true;
           sendAppData();
         } else if (verifyCode2 == value && inLockdownMode) {
@@ -182,12 +182,12 @@ void loop() {
     if (!botaoPressionado) {
       botaoPressionado = true;
       digitalWrite(switchPinBLE, LOW);
-      digitalWrite(switchPinFinger, HIGH); // Ligar o módulo de fingerprint
+      digitalWrite(switchPinFinger, HIGH);  // Ligar o módulo de fingerprint
     }
   } else {
     botaoPressionado = false;
     if (minhaVariavel) {
-      digitalWrite(switchPinFinger, inOficinaMode ? LOW : HIGH);
+      digitalWrite(switchPinFinger, HIGH);
     } else {
       digitalWrite(switchPinFinger, LOW);
     }
@@ -195,7 +195,7 @@ void loop() {
 
   // Verifica se já passaram 3 minutos desde o início
   if (millis() - startTime >= tresMinutos) {
-    minhaVariavel = false; // Define a variável como false após 3 minutos
+    minhaVariavel = false;  // Define a variável como false após 3 minutos
   }
 
   getFingerprintIDez();
@@ -204,17 +204,20 @@ void loop() {
     String dataReceived = Serial.readString();
     processCommand(dataReceived);
   }
-  
+
   adminController();
 
-  if (lockState) {
+  if (inGarageMode || inOficinaMode) {
+    digitalWrite(relayPin, LOW);
+  } else if (inLockdownMode) {
     digitalWrite(relayPin, HIGH);
   } else {
-    if (!inLockdownMode) {
+    if (lockState) {
+      digitalWrite(relayPin, HIGH);
+    } else {
       digitalWrite(relayPin, LOW);
     }
   }
-
 }
 
 
@@ -235,6 +238,14 @@ int getFingerprintIDez() {
   if (finger.fingerID == hasAdmin) {
     Serial.print("Modo Administrador!");
     adminMode = !adminMode;
+    if (inLockdownMode) {
+      setMode("lockdown", false);
+    }
+
+    setMode("oficina", false);
+    setMode("garage", false);
+    countStartWithoutPwd = 0;
+    EEPROM.write(8, countStartWithoutPwd);
   }
 
   lockState = !lockState;

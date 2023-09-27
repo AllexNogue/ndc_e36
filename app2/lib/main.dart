@@ -24,6 +24,123 @@ class BluetoothApp extends StatefulWidget {
   _BluetoothAppState createState() => _BluetoothAppState();
 }
 
+class ConfigScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Configuração'),
+        backgroundColor: Colors.deepOrange,
+      ),
+      body: ListView(
+        padding: EdgeInsets.all(20),
+        children: [
+          ConfigSectionMaxPartidas(),
+          SizedBox(height: 20),
+          ConfigSectionDigitais(),
+        ],
+      ),
+    );
+  }
+}
+
+class ConfigSectionMaxPartidas extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Máximo de partidas no modo Garagem",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 10),
+            // Exemplo de input e botão
+            TextField(
+              keyboardType: TextInputType.number,
+              // Restante das configurações do TextField
+            ),
+            ElevatedButton(
+              onPressed: () {
+                // Lógica para salvar a configuração.
+                // Neste caso, o onPressed está vazio.
+              },
+              child: Text("Salvar"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ConfigSectionDigitais extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Digitais",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 10),
+            // Lista de digitais
+            ListView.builder(
+              shrinkWrap: true,
+              itemCount: 20,
+              itemBuilder: (context, index) {
+                final isReservedForAdmin = index < 5;
+                final digitalText = isReservedForAdmin ? "Admin" : "Vazio";
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Digital ${index + 1} - $digitalText",
+                      style: TextStyle(fontSize: 16),
+                    ),
+                    SizedBox(height: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ElevatedButton(
+                          onPressed: () {
+                            // Lógica para inserir a digital.
+                            // Neste caso, o onPressed está vazio.
+                          },
+                          child: Text("Inserir"),
+                        ),
+                        SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () {
+                            // Lógica para deletar a digital.
+                            // Neste caso, o onPressed está vazio.
+                          },
+                          child: Text("Deletar"),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 12),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class ArduinoData {
   bool lockState;
   bool adminMode;
@@ -142,7 +259,7 @@ class _BluetoothAppState extends State<BluetoothApp> {
     FlutterBluetoothSerial.instance.state.then((state) {
       setState(() {
         _bluetoothState = state!;
-        _connectionValidated = false;
+        _connectionValidated = true;
       });
     });
 
@@ -379,15 +496,20 @@ class _BluetoothAppState extends State<BluetoothApp> {
                                   child: ElevatedButton(
                                     onPressed: () {
                                       setState(() {
-                                        _selectedMode = _selectedMode == "oficina" ? null : "oficina";
-                                        _inOficinaMode = _selectedMode == "oficina";
+                                        _selectedMode =
+                                            _selectedMode == "oficina"
+                                                ? null
+                                                : "oficina";
+                                        _inOficinaMode =
+                                            _selectedMode == "oficina";
                                         _inGarageMode = false;
                                         _inLockdownMode = false;
                                       });
                                       _sendModeToBlueetooth();
                                     },
                                     style: ElevatedButton.styleFrom(
-                                      primary: _inOficinaMode ? Colors.green : null,
+                                      primary:
+                                          _inOficinaMode ? Colors.green : null,
                                     ),
                                     child: Text("Oficina"),
                                   ),
@@ -399,9 +521,13 @@ class _BluetoothAppState extends State<BluetoothApp> {
                                     onPressed: () {
                                       setState(() {
                                         // Desabilitar o botão se ele já estiver habilitado
-                                        _selectedMode = _selectedMode == "garage" ? null : "garage";
+                                        _selectedMode =
+                                            _selectedMode == "garage"
+                                                ? null
+                                                : "garage";
                                         _inOficinaMode = false;
-                                        _inGarageMode = _selectedMode == "garage"; // Ativa o lockdownMode se o modo lockdown for selecionado
+                                        _inGarageMode = _selectedMode ==
+                                            "garage"; // Ativa o lockdownMode se o modo lockdown for selecionado
                                         _inLockdownMode = false;
                                       });
                                       _sendModeToBlueetooth();
@@ -419,10 +545,14 @@ class _BluetoothAppState extends State<BluetoothApp> {
                                   child: ElevatedButton(
                                     onPressed: () {
                                       setState(() {
-                                        _selectedMode = _selectedMode == "lockdown" ? null : "lockdown";
+                                        _selectedMode =
+                                            _selectedMode == "lockdown"
+                                                ? null
+                                                : "lockdown";
                                         _inOficinaMode = false;
                                         _inGarageMode = false;
-                                        _inLockdownMode = _selectedMode == "lockdown"; // Ativa o lockdownMode se o modo lockdown for selecionado
+                                        _inLockdownMode = _selectedMode ==
+                                            "lockdown"; // Ativa o lockdownMode se o modo lockdown for selecionado
                                       });
                                       _sendModeToBlueetooth();
                                     },
@@ -452,26 +582,31 @@ class _BluetoothAppState extends State<BluetoothApp> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: <Widget>[
-                        Text(
-                          "NOTE: If you cannot find the device in the list, please pair the device by going to the Bluetooth settings",
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.red,
+                        // Se houver outros widgets aqui, eles ficarão centralizados
+                        // no espaço disponível acima do botão de configurações.
+
+                        // O botão de configurações colado na parte inferior.
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ConfigScreen(),
+                                  ),
+                                );
+                              },
+                              child: Text("Configurações"),
+                            ),
                           ),
-                        ),
-                        SizedBox(height: 15),
-                        ElevatedButton(
-                          child: Text("Bluetooth Settings"),
-                          onPressed: () {
-                            FlutterBluetoothSerial.instance.openSettings();
-                          },
                         ),
                       ],
                     ),
                   ),
                 ),
-              )
+              ),
             ],
           ),
         ),
